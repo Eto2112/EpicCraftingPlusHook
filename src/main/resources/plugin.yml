@@ -1,0 +1,22 @@
+name: EpicCraftingsRequireItemHook
+version: '${project.version}'
+main: com.eto2112.epiccraftingshook.EpicCraftingsHookPlugin
+api-version: '1.20'
+authors: [ Eto2112 ]
+description: Plugin that hooks to EpicCraftingsPlus for require item click handling
+website: https://github.com/Eto2112
+
+depend:
+  - EpicCraftingsPlus
+
+commands:
+  echook:
+    description: Main command for EpicCraftingsRequireItemHook
+    usage: /echook <reload>
+    permission: echook.admin
+    permission-message: You don't have permission to use this command!
+
+permissions:
+  echook.admin:
+    description: Access to admin commands
+    default: op

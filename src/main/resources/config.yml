@@ -1,0 +1,98 @@
+# EpicCraftingsRequireItemHook Configuration
+# Author: Eto2112
+version: 1.0
+
+# Configuration for require item click commands
+# Now supports multiple recipes detected by item names!
+items-command:
+  # Recipe 1: hai_ma_linh_kiem (detected by "phong ấn", "linh hồn biển" items)
+  hai_ma_linh_kiem:
+    1: # First require item (slot 10)
+      - '[console] ecraft opencraft %player_name% phongan'
+      - '[message] &aOpening Phong Ấn crafting...'
+    2: # Second require item (slot 11)
+      - '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
+      - '[message] &bOpening Trái Tim Linh Hồn Biển crafting...'
+
+  # Recipe 2: xeng_tho_phu_G (detected by "củ dền", "đất thổ thần" items)
+  xeng_tho_phu_G:
+    1: # First require item (slot 10)
+      - '[console] ecraft opencraft %player_name% require1'
+      - '[message] &6Opening Củ Dền crafting...'
+    2: # Second require item (slot 11)
+      - '[console] ecraft opencraft %player_name% require2'
+      - '[message] &eOpening Đất Thổ Thần crafting...'
+
+  # Recipe 3: epic_sword (detected by "epic", "sword", "iron ingot" items)
+  epic_sword:
+    1: # First require item (slot 10)
+      - '[console] give %player_name% iron_ingot 64'
+      - '[message] &7You need iron for this epic sword!'
+    2: # Second require item (slot 11)
+      - '[console] ecraft opencraft %player_name% gem_crafting'
+      - '[message] &dOpening gem crafting...'
+    3: # Third require item (slot 12)
+      - '[player] shop buy leather 32'
+      - '[message] &cBuying leather materials...'
+
+  # Fallback: default_crafting (when no recipe is detected)
+  default_crafting:
+    1: # First require item (slot 10)
+      - '[console] ecraft opencraft %player_name% phongan'
+      - '[message] &eDefault action for position 1'
+    2: # Second require item (slot 11)
+      - '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
+      - '[message] &eDefault action for position 2'
+    3: # Third require item (slot 12)
+      - '[message] &eDefault action for position 3'
+    4: # Fourth require item (slot 13)
+      - '[message] &eDefault action for position 4'
+
+# Slot mapping configuration
+slot-mapping:
+  positions:
+    1: 10   # First require item at slot 10
+    2: 11   # Second require item at slot 11
+    3: 12   # Third require item at slot 12
+    4: 13   # Fourth require item at slot 13
+    5: 19   # Fifth require item at slot 19
+    6: 20   # Sixth require item at slot 20
+    7: 21   # Seventh require item at slot 21
+    8: 22   # Eighth require item at slot 22
+    9: 28   # Ninth require item at slot 28
+    10: 29  # Tenth require item at slot 29
+    11: 30  # Eleventh require item at slot 30
+    12: 31  # Twelfth require item at slot 31
+
+# General plugin settings
+settings:
+  debug: true  # Keep enabled to see recipe detection
+  cancel-click: true
+  command-delay: 2
+  click-sound:
+    enabled: true
+    sound: "UI_BUTTON_CLICK"
+    volume: 0.5
+    pitch: 1.0
+  click-particles:
+    enabled: true
+    particle: "VILLAGER_HAPPY"
+    count: 5
+
+# Menu detection settings
+menu-detection:
+  title-patterns:
+    - "chế tạo"
+  strict-matching: false
+
+# Command execution settings
+commands:
+  max-commands-per-click: 10
+  async-execution: true
+  cooldown:
+    enabled: true
+    duration: 1
+  error-handling:
+    log-errors: true
+    notify-player: false
+    fallback-message: "&cSomething went wrong! Please contact an administrator."
