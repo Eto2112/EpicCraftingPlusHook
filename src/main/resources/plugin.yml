@@ -9,6 +9,9 @@ website: https://github.com/Eto2112
 depend:
   - EpicCraftingsPlus
 
+softdepend:
+  - MMOItems
+
 commands:
   echook:
     description: Main command for EpicCraftingsRequireItemHook

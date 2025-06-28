@@ -1,52 +1,42 @@
 # EpicCraftingsRequireItemHook Configuration
 # Author: Eto2112
-version: 1.0
+version: 1.1
 
 # Configuration for require item click commands
-# Now supports multiple recipes detected by item names!
+# Format: MMOITEMID (UPPERCASE)
 items-command:
-  # Recipe 1: hai_ma_linh_kiem (detected by "phong ấn", "linh hồn biển" items)
-  hai_ma_linh_kiem:
+  # Example: BICHNHA (detected from MMOItems ID in slot 25)
+  BICHNHA:
     1: # First require item (slot 10)
       - '[console] ecraft opencraft %player_name% phongan'
-      - '[message] &aOpening Phong Ấn crafting...'
     2: # Second require item (slot 11)
       - '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
-      - '[message] &bOpening Trái Tim Linh Hồn Biển crafting...'
 
-  # Recipe 2: xeng_tho_phu_G (detected by "củ dền", "đất thổ thần" items)
-  xeng_tho_phu_G:
+  BANGTHANKIEM1:
     1: # First require item (slot 10)
-      - '[console] ecraft opencraft %player_name% require1'
-      - '[message] &6Opening Củ Dền crafting...'
+      - '[console] ecraft opencraft %player_name% bang_than_kiem2'
     2: # Second require item (slot 11)
-      - '[console] ecraft opencraft %player_name% require2'
-      - '[message] &eOpening Đất Thổ Thần crafting...'
+      - '[console] ecraft opencraft %player_name% bang_tinh_loc'
 
-  # Recipe 3: epic_sword (detected by "epic", "sword", "iron ingot" items)
-  epic_sword:
-    1: # First require item (slot 10)
-      - '[console] give %player_name% iron_ingot 64'
-      - '[message] &7You need iron for this epic sword!'
-    2: # Second require item (slot 11)
-      - '[console] ecraft opencraft %player_name% gem_crafting'
-      - '[message] &dOpening gem crafting...'
-    3: # Third require item (slot 12)
-      - '[player] shop buy leather 32'
-      - '[message] &cBuying leather materials...'
-
-  # Fallback: default_crafting (when no recipe is detected)
+  BANGTHANKIEM:
+    1:
+      - '[console] ecraft opencraft %player_name% bang_tinh_loc'
+    2:
+      - '[console] ecraft opencraft %player_name% bang_than_kiem1'
+  # Fallback: default_crafting (when no recipe is detected or item not configured)
   default_crafting:
-    1: # First require item (slot 10)
-      - '[console] ecraft opencraft %player_name% phongan'
-      - '[message] &eDefault action for position 1'
-    2: # Second require item (slot 11)
-      - '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
-      - '[message] &eDefault action for position 2'
-    3: # Third require item (slot 12)
-      - '[message] &eDefault action for position 3'
-    4: # Fourth require item (slot 13)
-      - '[message] &eDefault action for position 4'
+    1:
+      - '[message] Không tìm thấy công thức cho item này'
+      - '[message] &7Báo admin ngay nhaa.'
+    2:
+      - '[message] Không tìm thấy công thức cho item này'
+      - '[message] &7Báo admin ngay nhaa.'
+    3:
+      - '[message] Không tìm thấy công thức cho item này'
+      - '[message] &7Báo admin ngay nhaa.'
+    4:
+      - '[message] Không tìm thấy công thức cho item này'
+      - '[message] &7Báo admin ngay nhaa.'
 
 # Slot mapping configuration
 slot-mapping:
@@ -66,7 +56,7 @@ slot-mapping:
 
 # General plugin settings
 settings:
-  debug: true  # Keep enabled to see recipe detection
+  debug: true
   cancel-click: true
   command-delay: 2
   click-sound:
@@ -81,9 +71,14 @@ settings:
 
 # Menu detection settings
 menu-detection:
-  title-patterns:
-    - "chế tạo"
-  strict-matching: false
+  # Plugin will only work when:
+  # 1. Menu title contains "chế tạo"
+  # 2. There's an item with custom model data 10004 at slot 34
+  # 3. There's a result item with MMOItems ID at slot 25
+  title-pattern: "chế tạo"
+  recipe-indicator-slot: 34
+  recipe-indicator-model-data: 10004
+  result-item-slot: 25
 
 # Command execution settings
 commands:
@@ -96,3 +91,10 @@ commands:
     log-errors: true
     notify-player: false
     fallback-message: "&cSomething went wrong! Please contact an administrator."
+
+# MMOItems integration settings
+mmoitems:
+  # These are the persistent data container keys used by MMOItems
+  id-key: "mmoitems:mmoitems_item_id"
+  # Convert to uppercase for consistency
+  uppercase-keys: true

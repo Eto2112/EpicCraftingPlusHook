@@ -12,7 +12,6 @@ public class ConfigManager {
     private FileConfiguration config;
     private Map<Integer, Integer> slotMapping;
     private Map<String, Map<Integer, List<String>>> itemCommands;
-    private Map<String, String> customTitles;
     private List<String> titlePatterns;
 
     public ConfigManager(EpicCraftingsHookPlugin plugin) {
@@ -81,23 +80,23 @@ public class ConfigManager {
         ConfigurationSection commandsSection = config.getConfigurationSection("items-command");
 
         if (commandsSection != null) {
-            for (String craftingFile : commandsSection.getKeys(false)) {
+            for (String recipeKey : commandsSection.getKeys(false)) {
                 if (isDebugEnabled()) {
-                    plugin.getLogger().info("Loading commands for file: '" + craftingFile + "'");
+                    plugin.getLogger().info("Loading commands for recipe: '" + recipeKey + "'");
                 }
 
-                Map<Integer, List<String>> fileCommands = new HashMap<>();
-                ConfigurationSection fileSection = commandsSection.getConfigurationSection(craftingFile);
+                Map<Integer, List<String>> recipeCommands = new HashMap<>();
+                ConfigurationSection recipeSection = commandsSection.getConfigurationSection(recipeKey);
 
-                if (fileSection != null) {
-                    for (String slotKey : fileSection.getKeys(false)) {
+                if (recipeSection != null) {
+                    for (String slotKey : recipeSection.getKeys(false)) {
                         if (isDebugEnabled()) {
-                            plugin.getLogger().info("Processing slot key: '" + slotKey + "' for file: '" + craftingFile + "'");
+                            plugin.getLogger().info("Processing slot key: '" + slotKey + "' for recipe: '" + recipeKey + "'");
                         }
 
                         try {
                             int slot = Integer.parseInt(slotKey);
-                            Object commandsObj = fileSection.get(slotKey);
+                            Object commandsObj = recipeSection.get(slotKey);
 
                             List<String> commands = new ArrayList<>();
                             if (commandsObj instanceof List) {
@@ -113,25 +112,25 @@ public class ConfigManager {
                             }
 
                             if (!commands.isEmpty()) {
-                                fileCommands.put(slot, commands);
+                                recipeCommands.put(slot, commands);
                                 if (isDebugEnabled()) {
-                                    plugin.getLogger().info("Added " + commands.size() + " commands for slot " + slot + " in " + craftingFile);
+                                    plugin.getLogger().info("Added " + commands.size() + " commands for slot " + slot + " in " + recipeKey);
                                 }
                             }
                         } catch (NumberFormatException e) {
-                            plugin.getLogger().warning("Invalid slot number in " + craftingFile + ": " + slotKey);
+                            plugin.getLogger().warning("Invalid slot number in " + recipeKey + ": " + slotKey);
                         }
                     }
                 } else {
                     if (isDebugEnabled()) {
-                        plugin.getLogger().warning("No configuration section found for: " + craftingFile);
+                        plugin.getLogger().warning("No configuration section found for: " + recipeKey);
                     }
                 }
 
-                if (!fileCommands.isEmpty()) {
-                    itemCommands.put(craftingFile, fileCommands);
+                if (!recipeCommands.isEmpty()) {
+                    itemCommands.put(recipeKey, recipeCommands);
                     if (isDebugEnabled()) {
-                        plugin.getLogger().info("Successfully loaded " + fileCommands.size() + " slot configurations for " + craftingFile);
+                        plugin.getLogger().info("Successfully loaded " + recipeCommands.size() + " slot configurations for " + recipeKey);
                     }
                 }
             }
@@ -139,21 +138,18 @@ public class ConfigManager {
             plugin.getLogger().warning("No 'items-command' section found in config.yml");
         }
 
-        plugin.getLogger().info("Loaded item commands for " + itemCommands.size() + " crafting files");
+        plugin.getLogger().info("Loaded item commands for " + itemCommands.size() + " recipes");
         if (isDebugEnabled()) {
-            plugin.getLogger().info("Loaded crafting files: " + itemCommands.keySet());
+            plugin.getLogger().info("Loaded recipes: " + itemCommands.keySet());
         }
     }
 
     private void loadMenuDetection() {
-        // Load title patterns
+        // Load title patterns - simplified to just look for "chế tạo"
         titlePatterns = config.getStringList("menu-detection.title-patterns");
         if (titlePatterns.isEmpty()) {
-            titlePatterns = Arrays.asList("craft", "chế tạo", "recipe", "công thức");
+            titlePatterns = Arrays.asList("chế tạo");
         }
-
-        // Initialize empty custom titles map
-        customTitles = new HashMap<>();
 
         if (isDebugEnabled()) {
             plugin.getLogger().info("Loaded title patterns: " + titlePatterns);
@@ -162,19 +158,19 @@ public class ConfigManager {
 
     // Getter methods
 
-    public List<String> getCommandsForItem(String craftingFile, int slotPosition) {
-        Map<Integer, List<String>> fileCommands = itemCommands.get(craftingFile);
-        if (fileCommands != null) {
-            return fileCommands.getOrDefault(slotPosition, new ArrayList<>());
+    public List<String> getCommandsForItem(String recipeKey, int slotPosition) {
+        Map<Integer, List<String>> recipeCommands = itemCommands.get(recipeKey);
+        if (recipeCommands != null) {
+            return recipeCommands.getOrDefault(slotPosition, new ArrayList<>());
         }
         return new ArrayList<>();
     }
 
-    public List<String> getCommandsForSlot(String craftingFile, int inventorySlot) {
+    public List<String> getCommandsForSlot(String recipeKey, int inventorySlot) {
         // Convert inventory slot to position number
         int position = getPositionFromSlot(inventorySlot);
         if (position > 0) {
-            return getCommandsForItem(craftingFile, position);
+            return getCommandsForItem(recipeKey, position);
         }
         return new ArrayList<>();
     }
@@ -198,10 +194,6 @@ public class ConfigManager {
 
     public List<String> getTitlePatterns() {
         return new ArrayList<>(titlePatterns);
-    }
-
-    public String getCustomTitle(String craftingFile) {
-        return customTitles.get(craftingFile);
     }
 
     public boolean isStrictMatching() {
@@ -277,14 +269,33 @@ public class ConfigManager {
                 "&cSomething went wrong! Please contact an administrator.");
     }
 
+    // Recipe indicator settings
+    public int getRecipeIndicatorSlot() {
+        return config.getInt("menu-detection.recipe-indicator-slot", 34);
+    }
+
+    public int getRecipeIndicatorModelData() {
+        return config.getInt("menu-detection.recipe-indicator-model-data", 10004);
+    }
+
+    public int getResultItemSlot() {
+        return config.getInt("menu-detection.result-item-slot", 25);
+    }
+
     // Utility methods
 
-    public Set<String> getConfiguredCraftingFiles() {
+    public Set<String> getConfiguredRecipes() {
         return new HashSet<>(itemCommands.keySet());
     }
 
     public void reloadConfiguration() {
         loadConfig();
+
+        // Clear any caches in the listener if it exists
+        if (plugin.getMenuListener() != null) {
+            plugin.getMenuListener().cleanupCooldowns();
+        }
+
         plugin.getLogger().info("Configuration reloaded!");
     }
 
@@ -297,18 +308,21 @@ public class ConfigManager {
 
         plugin.getLogger().info("=== Configuration Debug Info ===");
         plugin.getLogger().info("Version: " + getConfigVersion());
-        plugin.getLogger().info("Configured crafting files: " + getConfiguredCraftingFiles());
+        plugin.getLogger().info("Configured recipes: " + getConfiguredRecipes());
         plugin.getLogger().info("Slot mapping: " + slotMapping);
         plugin.getLogger().info("Title patterns: " + titlePatterns);
         plugin.getLogger().info("Cancel click: " + shouldCancelClick());
         plugin.getLogger().info("Command delay: " + getCommandDelay());
         plugin.getLogger().info("Max commands per click: " + getMaxCommandsPerClick());
+        plugin.getLogger().info("Recipe indicator slot: " + getRecipeIndicatorSlot());
+        plugin.getLogger().info("Recipe indicator model data: " + getRecipeIndicatorModelData());
+        plugin.getLogger().info("Result item slot: " + getResultItemSlot());
 
-        // Debug each crafting file
+        // Debug each recipe
         for (Map.Entry<String, Map<Integer, List<String>>> entry : itemCommands.entrySet()) {
-            plugin.getLogger().info("File '" + entry.getKey() + "' has " + entry.getValue().size() + " configured slots");
+            plugin.getLogger().info("Recipe '" + entry.getKey() + "' has " + entry.getValue().size() + " configured slots");
             for (Map.Entry<Integer, List<String>> slotEntry : entry.getValue().entrySet()) {
-                plugin.getLogger().info("  Slot " + slotEntry.getKey() + ": " + slotEntry.getValue().size() + " commands");
+                plugin.getLogger().info("  Position " + slotEntry.getKey() + ": " + slotEntry.getValue().size() + " commands");
             }
         }
     }

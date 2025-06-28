@@ -2,7 +2,12 @@ package com.eto2112.epiccraftingshook.listeners;
 
 import com.eto2112.epiccraftingshook.EpicCraftingsHookPlugin;
 import com.eto2112.epiccraftingshook.utils.ConfigManager;
+import net.Indyuce.mmoitems.MMOItems;
+import net.Indyuce.mmoitems.api.item.mmoitem.MMOItem;
+import net.Indyuce.mmoitems.api.item.mmoitem.VolatileMMOItem;
+import io.lumine.mythic.lib.api.item.NBTItem;
 import org.bukkit.ChatColor;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
@@ -13,10 +18,11 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.configuration.file.YamlConfiguration;
 
-import java.io.File;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,14 +31,11 @@ public class EnhancedCraftingMenuListener implements Listener {
     private final EpicCraftingsHookPlugin plugin;
     private final ConfigManager configManager;
 
-    // Track which crafting menu each player has open
-    private final Map<UUID, String> playerCraftingMenus = new ConcurrentHashMap<>();
+    // Track which recipe each player has open (using TYPE.MMOITEMID format)
+    private final Map<UUID, String> playerCurrentRecipes = new ConcurrentHashMap<>();
 
     // Command cooldown tracking
     private final Map<UUID, Long> commandCooldowns = new ConcurrentHashMap<>();
-
-    // Cache for recipe data to avoid repeated file reads
-    private final Map<String, Map<String, Object>> recipeCache = new ConcurrentHashMap<>();
 
     public EnhancedCraftingMenuListener(EpicCraftingsHookPlugin plugin) {
         this.plugin = plugin;
@@ -54,25 +57,26 @@ public class EnhancedCraftingMenuListener implements Listener {
             plugin.getLogger().info("DEBUG: Player " + player.getName() + " opened menu: '" + cleanTitle + "'");
         }
 
-        // If this is a crafting menu, detect the recipe after a short delay
+        // Check if this is a crafting menu (contains "chế tạo")
         if (isCraftingMenu(title)) {
-            // Delay recipe detection to allow inventory to fully load
+            // Delay check to allow inventory to fully load
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    String detectedRecipe = detectRecipeFromItems(event.getView());
-                    if (detectedRecipe != null) {
-                        playerCraftingMenus.put(player.getUniqueId(), detectedRecipe);
+                    boolean hasRecipeIndicator = checkRecipeIndicator(event.getView());
+                    if (hasRecipeIndicator) {
+                        // Mark this player as having a valid crafting menu open
+                        playerCurrentRecipes.put(player.getUniqueId(), "CRAFTING_ACTIVE");
 
                         if (configManager.isDebugEnabled()) {
-                            plugin.getLogger().info("DETECTED: Player " + player.getName() + " is crafting: " + detectedRecipe);
+                            plugin.getLogger().info("CRAFTING ENABLED: Player " + player.getName() + " has valid crafting menu (slot 34 indicator found)");
                         }
                     } else {
-                        // Fallback to default if no recipe detected
-                        playerCraftingMenus.put(player.getUniqueId(), "default_crafting");
+                        // Use default_crafting as fallback
+                        playerCurrentRecipes.put(player.getUniqueId(), "default_crafting");
 
                         if (configManager.isDebugEnabled()) {
-                            plugin.getLogger().info("FALLBACK: Using default_crafting for " + player.getName());
+                            plugin.getLogger().info("FALLBACK: Using default_crafting for " + player.getName() + " (no slot 34 indicator)");
                         }
                     }
                 }
@@ -80,230 +84,89 @@ public class EnhancedCraftingMenuListener implements Listener {
         }
     }
 
-    private String detectRecipeFromItems(org.bukkit.inventory.InventoryView view) {
+    private boolean checkRecipeIndicator(org.bukkit.inventory.InventoryView view) {
         if (view == null || view.getTopInventory() == null) {
-            return null;
-        }
-
-        try {
-            // Get EpicCraftingsPlus craftings folder
-            File epicCraftingsFolder = new File(plugin.getDataFolder().getParentFile(), "EpicCraftingsPlus");
-            File craftingsFolder = new File(epicCraftingsFolder, "craftings");
-
-            if (!craftingsFolder.exists() || !craftingsFolder.isDirectory()) {
-                if (configManager.isDebugEnabled()) {
-                    plugin.getLogger().warning("EpicCraftingsPlus craftings folder not found: " + craftingsFolder.getPath());
-                }
-                return null;
-            }
-
-            // Get current items in require item slots
-            Map<Integer, String> currentItems = getCurrentRequireItems(view);
-
-            if (currentItems.isEmpty()) {
-                if (configManager.isDebugEnabled()) {
-                    plugin.getLogger().info("No require items found in current menu");
-                }
-                return null;
-            }
-
-            // Check all YAML files in craftings folder
-            File[] yamlFiles = craftingsFolder.listFiles((dir, name) -> name.endsWith(".yml"));
-            if (yamlFiles == null) {
-                return null;
-            }
-
-            for (File yamlFile : yamlFiles) {
-                String recipeName = yamlFile.getName().replace(".yml", "");
-
-                if (configManager.isDebugEnabled()) {
-                    plugin.getLogger().info("Checking recipe file: " + recipeName);
-                }
-
-                if (matchesRecipeRequirements(yamlFile, currentItems)) {
-                    if (configManager.isDebugEnabled()) {
-                        plugin.getLogger().info("RECIPE MATCH: Current items match " + recipeName);
-                    }
-                    return recipeName;
-                }
-            }
-
-        } catch (Exception e) {
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().warning("Error detecting recipe from files: " + e.getMessage());
-            }
-        }
-
-        return null;
-    }
-
-    private Map<Integer, String> getCurrentRequireItems(org.bukkit.inventory.InventoryView view) {
-        Map<Integer, String> items = new HashMap<>();
-
-        // Check require item slots: 10-13, 19-22, 28-31
-        int[] requireSlots = {10, 11, 12, 13, 19, 20, 21, 22, 28, 29, 30, 31};
-
-        for (int slot : requireSlots) {
-            try {
-                ItemStack item = view.getTopInventory().getItem(slot);
-                if (item != null && item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-                    String itemName = ChatColor.stripColor(item.getItemMeta().getDisplayName());
-                    items.put(slot, itemName);
-
-                    if (configManager.isDebugEnabled()) {
-                        plugin.getLogger().info("DEBUG: Found require item at slot " + slot + ": '" + itemName + "'");
-                    }
-                }
-            } catch (Exception e) {
-                // Skip this slot if there's an error
-            }
-        }
-
-        return items;
-    }
-
-    private boolean matchesRecipeRequirements(File recipeFile, Map<Integer, String> currentItems) {
-        try {
-            // Load or get cached recipe data
-            Map<String, Object> recipeData = getRecipeData(recipeFile);
-            if (recipeData == null) {
-                return false;
-            }
-
-            // Get requires section
-            Object requiresObj = recipeData.get("requires");
-            if (!(requiresObj instanceof List)) {
-                return false;
-            }
-
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> requires = (List<Map<String, Object>>) requiresObj;
-
-            // Check if any of the current items match the recipe requirements
-            for (Map<String, Object> requirement : requires) {
-                String reqName = getRequirementDisplayName(requirement);
-                if (reqName != null) {
-                    // Check if any current item matches this requirement
-                    for (String currentItemName : currentItems.values()) {
-                        if (itemNamesMatch(reqName, currentItemName)) {
-                            if (configManager.isDebugEnabled()) {
-                                plugin.getLogger().info("ITEM MATCH: '" + currentItemName + "' matches requirement '" + reqName + "' in " + recipeFile.getName());
-                            }
-                            return true;
-                        }
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().warning("Error checking recipe " + recipeFile.getName() + ": " + e.getMessage());
-            }
-        }
-
-        return false;
-    }
-
-    private Map<String, Object> getRecipeData(File recipeFile) {
-        String fileName = recipeFile.getName();
-
-        // Check cache first
-        if (recipeCache.containsKey(fileName)) {
-            return recipeCache.get(fileName);
-        }
-
-        try {
-            YamlConfiguration config = YamlConfiguration.loadConfiguration(recipeFile);
-            Map<String, Object> data = config.getValues(false);
-
-            // Cache the data
-            recipeCache.put(fileName, data);
-
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().info("Loaded recipe data for: " + fileName);
-            }
-
-            return data;
-        } catch (Exception e) {
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().warning("Error loading recipe file " + fileName + ": " + e.getMessage());
-            }
-            return null;
-        }
-    }
-
-    private String getRequirementDisplayName(Map<String, Object> requirement) {
-        try {
-            // Get the name from the requirement
-            Object nameObj = requirement.get("name");
-            if (nameObj instanceof String) {
-                String name = (String) nameObj;
-                // Translate color codes and clean
-                return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', name));
-            }
-
-            // Fallback: try to get from id if name is not available
-            Object idObj = requirement.get("id");
-            if (idObj instanceof String) {
-                String id = (String) idObj;
-                // Parse id format: "MATERIAL;amount:32;name:DisplayName"
-                if (id.contains("name:")) {
-                    String[] parts = id.split("name:");
-                    if (parts.length > 1) {
-                        String namePart = parts[1].split(";")[0];
-                        return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', namePart));
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().warning("Error getting requirement display name: " + e.getMessage());
-            }
-        }
-
-        return null;
-    }
-
-    private boolean itemNamesMatch(String recipeName, String currentName) {
-        if (recipeName == null || currentName == null) {
             return false;
         }
 
-        String cleanRecipeName = recipeName.toLowerCase().trim();
-        String cleanCurrentName = currentName.toLowerCase().trim();
+        try {
+            // Check if there's an item with custom model data 10004 at slot 34 (recipe indicator)
+            ItemStack indicatorItem = view.getTopInventory().getItem(34);
 
-        // Exact match
-        if (cleanRecipeName.equals(cleanCurrentName)) {
-            return true;
-        }
-
-        // Contains match (either direction)
-        if (cleanRecipeName.contains(cleanCurrentName) || cleanCurrentName.contains(cleanRecipeName)) {
-            return true;
-        }
-
-        // Remove special characters and check again
-        String simpleRecipeName = cleanRecipeName.replaceAll("[\\[\\](){}0-9\\s]", "");
-        String simpleCurrentName = cleanCurrentName.replaceAll("[\\[\\](){}0-9\\s]", "");
-
-        if (simpleRecipeName.length() > 2 && simpleCurrentName.length() > 2) {
-            if (simpleRecipeName.contains(simpleCurrentName) || simpleCurrentName.contains(simpleRecipeName)) {
-                return true;
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("=== SLOT 34 (Recipe Indicator) CHECK ===");
+                if (indicatorItem == null) {
+                    plugin.getLogger().info("Slot 34: NULL ITEM");
+                } else {
+                    plugin.getLogger().info("Slot 34 Material: " + indicatorItem.getType());
+                    plugin.getLogger().info("Slot 34 Amount: " + indicatorItem.getAmount());
+                    if (indicatorItem.hasItemMeta()) {
+                        ItemMeta indicatorMeta = indicatorItem.getItemMeta();
+                        plugin.getLogger().info("Slot 34 Has CustomModelData: " + indicatorMeta.hasCustomModelData());
+                        if (indicatorMeta.hasCustomModelData()) {
+                            plugin.getLogger().info("Slot 34 CustomModelData: " + indicatorMeta.getCustomModelData());
+                        }
+                        if (indicatorMeta.hasDisplayName()) {
+                            plugin.getLogger().info("Slot 34 Display Name: '" + indicatorMeta.getDisplayName() + "'");
+                        }
+                    } else {
+                        plugin.getLogger().info("Slot 34: No ItemMeta");
+                    }
+                }
             }
+
+            return isValidRecipeIndicator(indicatorItem);
+
+        } catch (Exception e) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().warning("Error checking recipe indicator: " + e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    private boolean isValidRecipeIndicator(ItemStack item) {
+        if (item == null) {
+            return false;
         }
 
-        return false;
+        try {
+            if (!item.hasItemMeta()) {
+                return false;
+            }
+
+            ItemMeta meta = item.getItemMeta();
+            if (meta == null) {
+                return false;
+            }
+
+            return meta.hasCustomModelData() && meta.getCustomModelData() == 10004;
+        } catch (Exception e) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().warning("Error checking recipe indicator: " + e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    private boolean isCraftingMenu(String title) {
+        if (title == null) return false;
+
+        String cleanTitle = ChatColor.stripColor(title);
+        String lowerTitle = cleanTitle.toLowerCase();
+
+        // Check for "chế tạo" specifically
+        return lowerTitle.contains("chế tạo");
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getPlayer() instanceof Player) {
             Player player = (Player) event.getPlayer();
-            String recipe = playerCraftingMenus.remove(player.getUniqueId());
+            String status = playerCurrentRecipes.remove(player.getUniqueId());
 
-            if (recipe != null && configManager.isDebugEnabled()) {
-                plugin.getLogger().info("Player " + player.getName() + " closed crafting menu: " + recipe);
+            if (status != null && configManager.isDebugEnabled()) {
+                plugin.getLogger().info("Player " + player.getName() + " closed crafting menu (was: " + status + ")");
             }
         }
     }
@@ -321,11 +184,20 @@ public class EnhancedCraftingMenuListener implements Listener {
             return;
         }
 
-        // Get the current recipe
-        String currentRecipe = playerCraftingMenus.get(player.getUniqueId());
-        if (currentRecipe == null) {
+        // IMPORTANT: Check if this menu actually has the slot 34 indicator
+        // This prevents fake chests with "chế tạo" name from working
+        if (!checkRecipeIndicator(event.getView())) {
             if (configManager.isDebugEnabled()) {
-                plugin.getLogger().info("DEBUG: No recipe tracked for player " + player.getName());
+                plugin.getLogger().info("DEBUG: Menu has 'chế tạo' in title but no slot 34 indicator - ignoring click");
+            }
+            return;
+        }
+
+        // Check if we have a valid crafting session (should be CRAFTING_ACTIVE if indicator exists)
+        String currentStatus = playerCurrentRecipes.get(player.getUniqueId());
+        if (currentStatus == null || !currentStatus.equals("CRAFTING_ACTIVE")) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("DEBUG: No valid crafting session for player " + player.getName() + " (status: " + currentStatus + ")");
             }
             return;
         }
@@ -334,7 +206,7 @@ public class EnhancedCraftingMenuListener implements Listener {
 
         // DEBUG: Log all clicks when debug is enabled
         if (configManager.isDebugEnabled()) {
-            plugin.getLogger().info("DEBUG: Player " + player.getName() + " clicked slot " + clickedSlot + " in recipe: " + currentRecipe);
+            plugin.getLogger().info("DEBUG: Player " + player.getName() + " clicked slot " + clickedSlot + " in VALID crafting menu");
         }
 
         // Check if this slot is configured as a require item slot
@@ -345,16 +217,28 @@ public class EnhancedCraftingMenuListener implements Listener {
             return;
         }
 
+        // Detect the recipe from slot 25 when they click
+        String recipeKey = detectRecipeFromSlot25(event.getView());
+        if (recipeKey == null) {
+            recipeKey = "default_crafting";
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("Could not detect recipe from slot 25, using default_crafting");
+            }
+        }
+
         // Check cooldown
         if (isOnCooldown(player)) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("DEBUG: Player " + player.getName() + " is on cooldown");
+            }
             return;
         }
 
-        // Get commands for this slot in the current recipe
-        List<String> commands = configManager.getCommandsForSlot(currentRecipe, clickedSlot);
+        // Get commands for this slot in the detected recipe
+        List<String> commands = configManager.getCommandsForSlot(recipeKey, clickedSlot);
         if (commands.isEmpty()) {
             if (configManager.isDebugEnabled()) {
-                plugin.getLogger().info("No commands configured for slot " + clickedSlot + " in recipe " + currentRecipe);
+                plugin.getLogger().info("No commands configured for slot " + clickedSlot + " in recipe " + recipeKey);
             }
             return;
         }
@@ -372,7 +256,7 @@ public class EnhancedCraftingMenuListener implements Listener {
 
         if (configManager.isDebugEnabled()) {
             plugin.getLogger().info("Player " + player.getName() + " clicked require item at slot " +
-                    clickedSlot + " in recipe " + currentRecipe + " (position: " +
+                    clickedSlot + " in recipe " + recipeKey + " (position: " +
                     configManager.getPositionFromSlot(clickedSlot) + ")");
             plugin.getLogger().info("Executing " + commands.size() + " commands");
         }
@@ -387,20 +271,177 @@ public class EnhancedCraftingMenuListener implements Listener {
         executeCommands(player, commands);
     }
 
-    private boolean isCraftingMenu(String title) {
-        if (title == null) return false;
+    private String detectRecipeFromSlot25(org.bukkit.inventory.InventoryView view) {
+        if (view == null || view.getTopInventory() == null) {
+            return null;
+        }
 
-        String cleanTitle = ChatColor.stripColor(title);
-        String lowerTitle = cleanTitle.toLowerCase();
+        try {
+            // Get the result item from slot 25
+            ItemStack resultItem = view.getTopInventory().getItem(25);
 
-        for (String pattern : configManager.getTitlePatterns()) {
-            String cleanPattern = ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', pattern)).toLowerCase();
-            if (lowerTitle.contains(cleanPattern)) {
-                return true;
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("=== SLOT 25 (Result Item) DEBUG ===");
+                if (resultItem == null) {
+                    plugin.getLogger().info("Slot 25: NULL ITEM");
+                } else {
+                    plugin.getLogger().info("Slot 25 Material: " + resultItem.getType());
+                    plugin.getLogger().info("Slot 25 Amount: " + resultItem.getAmount());
+                    if (resultItem.hasItemMeta()) {
+                        plugin.getLogger().info("Slot 25: Has ItemMeta");
+                        ItemMeta resultMeta = resultItem.getItemMeta();
+                        if (resultMeta.hasDisplayName()) {
+                            plugin.getLogger().info("Slot 25 Display Name: '" + ChatColor.stripColor(resultMeta.getDisplayName()) + "'");
+                        }
+                        if (resultMeta.hasCustomModelData()) {
+                            plugin.getLogger().info("Slot 25 CustomModelData: " + resultMeta.getCustomModelData());
+                        }
+                    } else {
+                        plugin.getLogger().info("Slot 25: No ItemMeta");
+                    }
+                }
+            }
+
+            if (resultItem == null) {
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().info("No result item found at slot 25");
+                }
+                return null;
+            }
+
+            // Try to get MMOItems data using MMOItems API
+            String itemType = null;
+            String itemId = null;
+
+            try {
+                // Method 1: Try using MMOItems API correctly according to documentation
+                NBTItem nbtItem = NBTItem.get(resultItem);
+
+                // Check if this is an MMOItems item
+                if (nbtItem.hasType()) {
+                    // Get the item type using the official API
+                    itemType = nbtItem.getType();
+
+                    // Get the item ID using the official method
+                    itemId = nbtItem.getString("MMOITEMS_ITEM_ID");
+
+                    if (configManager.isDebugEnabled()) {
+                        plugin.getLogger().info("=== MMOItems API SUCCESS ===");
+                        plugin.getLogger().info("MMOItems TYPE: '" + (itemType != null ? itemType : "NULL") + "'");
+                        plugin.getLogger().info("MMOItems ID: '" + (itemId != null ? itemId : "NULL") + "'");
+                    }
+                } else {
+                    if (configManager.isDebugEnabled()) {
+                        plugin.getLogger().info("nbtItem.hasType() returned false - not an MMOItems item");
+                    }
+                }
+
+            } catch (Exception mmoError) {
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().warning("MMOItems API access failed: " + mmoError.getMessage());
+                    plugin.getLogger().info("Trying fallback methods...");
+                }
+
+                // Fallback Method 1: Try reading NBT via NMS
+                try {
+                    Class<?> craftItemStackClass = Class.forName("org.bukkit.craftbukkit." + getServerVersion() + ".inventory.CraftItemStack");
+                    Object nmsItemStack = craftItemStackClass.getMethod("asNMSCopy", ItemStack.class).invoke(null, resultItem);
+                    Object nbtTag = nmsItemStack.getClass().getMethod("getTag").invoke(nmsItemStack);
+
+                    if (nbtTag != null) {
+                        Boolean hasType = (Boolean) nbtTag.getClass().getMethod("hasKey", String.class).invoke(nbtTag, "MMOITEMS_ITEM_TYPE");
+                        if (hasType) {
+                            itemType = (String) nbtTag.getClass().getMethod("getString", String.class).invoke(nbtTag, "MMOITEMS_ITEM_TYPE");
+                        }
+
+                        Boolean hasId = (Boolean) nbtTag.getClass().getMethod("hasKey", String.class).invoke(nbtTag, "MMOITEMS_ITEM_ID");
+                        if (hasId) {
+                            itemId = (String) nbtTag.getClass().getMethod("getString", String.class).invoke(nbtTag, "MMOITEMS_ITEM_ID");
+                        }
+
+                        if (configManager.isDebugEnabled()) {
+                            plugin.getLogger().info("=== NBT FALLBACK SUCCESS ===");
+                            plugin.getLogger().info("MMOItems TYPE: " + (itemType != null ? "'" + itemType + "'" : "NULL"));
+                            plugin.getLogger().info("MMOItems ID: " + (itemId != null ? "'" + itemId + "'" : "NULL"));
+                        }
+                    }
+
+                } catch (Exception nbtError) {
+                    if (configManager.isDebugEnabled()) {
+                        plugin.getLogger().warning("NBT fallback also failed: " + nbtError.getMessage());
+                    }
+
+                    // Fallback Method 2: Try PDC
+                    try {
+                        if (resultItem.hasItemMeta()) {
+                            ItemMeta meta = resultItem.getItemMeta();
+                            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+
+                            NamespacedKey[] possibleKeys = {
+                                    new NamespacedKey("mmoitems", "mmoitems_item_type"),
+                                    new NamespacedKey("mmoitems", "mmoitems_item_id"),
+                                    NamespacedKey.fromString("mmoitems:mmoitems_item_type"),
+                                    NamespacedKey.fromString("mmoitems:mmoitems_item_id")
+                            };
+
+                            for (NamespacedKey key : possibleKeys) {
+                                if (key != null && pdc.has(key, PersistentDataType.STRING)) {
+                                    String value = pdc.get(key, PersistentDataType.STRING);
+                                    if (key.getKey().contains("type")) {
+                                        itemType = value;
+                                    } else if (key.getKey().contains("id")) {
+                                        itemId = value;
+                                    }
+
+                                    if (configManager.isDebugEnabled()) {
+                                        plugin.getLogger().info("Found PDC key " + key + ": " + value);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception pdcError) {
+                        if (configManager.isDebugEnabled()) {
+                            plugin.getLogger().warning("PDC fallback also failed: " + pdcError.getMessage());
+                        }
+                    }
+                }
+            }
+
+            if (itemId != null && !itemId.trim().isEmpty()) {
+                String recipeKey = itemId.trim().toUpperCase();
+
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().info("RECIPE DETECTED: " + recipeKey + " (MMOItems Type: " + itemType + ", ID: " + itemId + ")");
+                }
+
+                return recipeKey;
+            } else {
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().info("No MMOItems ID found in result item at slot 25");
+                    plugin.getLogger().info("This might not be an MMOItems item, or the API is not working correctly");
+
+                    // Debug: Check if MMOItems plugin is properly loaded
+                    if (plugin.getServer().getPluginManager().getPlugin("MMOItems") != null) {
+                        plugin.getLogger().info("MMOItems plugin is loaded: " + plugin.getServer().getPluginManager().getPlugin("MMOItems").getDescription().getVersion());
+                    } else {
+                        plugin.getLogger().warning("MMOItems plugin is not loaded!");
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().warning("Error detecting recipe from slot 25: " + e.getMessage());
+                e.printStackTrace();
             }
         }
 
-        return false;
+        return null;
+    }
+
+    private String getServerVersion() {
+        String packageName = plugin.getServer().getClass().getPackage().getName();
+        return packageName.substring(packageName.lastIndexOf('.') + 1);
     }
 
     private boolean isOnCooldown(Player player) {
@@ -513,20 +554,23 @@ public class EnhancedCraftingMenuListener implements Listener {
     }
 
     // Getter for testing purposes
-    public Map<UUID, String> getPlayerCraftingMenus() {
-        return new HashMap<>(playerCraftingMenus);
+    public Map<UUID, String> getPlayerCurrentRecipes() {
+        return new HashMap<>(playerCurrentRecipes);
     }
 
-    // Clean up cooldowns and cache periodically
+    // Clean up cooldowns periodically
     public void cleanupCooldowns() {
         long currentTime = System.currentTimeMillis();
         commandCooldowns.entrySet().removeIf(entry -> entry.getValue() < currentTime);
     }
 
-    public void clearRecipeCache() {
-        recipeCache.clear();
+    // Method called when config is reloaded
+    public void reloadRecipeData() {
+        // Clear any cached data if needed
+        cleanupCooldowns();
+
         if (configManager.isDebugEnabled()) {
-            plugin.getLogger().info("Recipe cache cleared");
+            plugin.getLogger().info("Recipe data reloaded for EnhancedCraftingMenuListener");
         }
     }
 }
