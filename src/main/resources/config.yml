@@ -1,100 +1,49 @@
 # EpicCraftingsRequireItemHook Configuration
-# Author: Eto2112
 version: 1.1
 
-# Configuration for require item click commands
-# Format: MMOITEMID (UPPERCASE)
+# Item commands - use MMOItems ID (UPPERCASE)
 items-command:
-  # Example: BICHNHA (detected from MMOItems ID in slot 25)
   BICHNHA:
-    1: # First require item (slot 10)
-      - '[console] ecraft opencraft %player_name% phongan'
-    2: # Second require item (slot 11)
-      - '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
+    1: '[console] ecraft opencraft %player_name% phongan'
+    2: '[console] ecraft opencraft %player_name% trai_tim_linh_bien'
 
   BANGTHANKIEM1:
-    1: # First require item (slot 10)
-      - '[console] ecraft opencraft %player_name% bang_than_kiem2'
-    2: # Second require item (slot 11)
-      - '[console] ecraft opencraft %player_name% bang_tinh_loc'
+    1: '[console] ecraft opencraft %player_name% bang_than_kiem2'
+    2: '[console] ecraft opencraft %player_name% bang_tinh_loc'
 
   BANGTHANKIEM:
-    1:
-      - '[console] ecraft opencraft %player_name% bang_tinh_loc'
-    2:
-      - '[console] ecraft opencraft %player_name% bang_than_kiem1'
-  # Fallback: default_crafting (when no recipe is detected or item not configured)
-  default_crafting:
-    1:
-      - '[message] Không tìm thấy công thức cho item này'
-      - '[message] &7Báo admin ngay nhaa.'
-    2:
-      - '[message] Không tìm thấy công thức cho item này'
-      - '[message] &7Báo admin ngay nhaa.'
-    3:
-      - '[message] Không tìm thấy công thức cho item này'
-      - '[message] &7Báo admin ngay nhaa.'
-    4:
-      - '[message] Không tìm thấy công thức cho item này'
-      - '[message] &7Báo admin ngay nhaa.'
+    1: '[console] ecraft opencraft %player_name% bang_tinh_loc'
+    2: '[console] ecraft opencraft %player_name% bang_than_kiem1'
 
-# Slot mapping configuration
+  # Fallback when recipe not found
+  default_crafting:
+    1: '[message] &cKhông tìm thấy công thức cho item này'
+    2: '[message] &cKhông tìm thấy công thức cho item này'
+    3: '[message] &cKhông tìm thấy công thức cho item này'
+    4: '[message] &cKhông tìm thấy công thức cho item này'
+
+# Slot mapping for require items
 slot-mapping:
   positions:
-    1: 10   # First require item at slot 10
-    2: 11   # Second require item at slot 11
-    3: 12   # Third require item at slot 12
-    4: 13   # Fourth require item at slot 13
-    5: 19   # Fifth require item at slot 19
-    6: 20   # Sixth require item at slot 20
-    7: 21   # Seventh require item at slot 21
-    8: 22   # Eighth require item at slot 22
-    9: 28   # Ninth require item at slot 28
-    10: 29  # Tenth require item at slot 29
-    11: 30  # Eleventh require item at slot 30
-    12: 31  # Twelfth require item at slot 31
+    1: 10    # Position 1 = Slot 10
+    2: 11    # Position 2 = Slot 11
+    3: 12    # Position 3 = Slot 12
+    4: 13    # Position 4 = Slot 13
+    5: 19    # Position 5 = Slot 19
+    6: 20    # Position 6 = Slot 20
+    7: 21    # Position 7 = Slot 21
+    8: 22    # Position 8 = Slot 22
+    9: 28    # Position 9 = Slot 28
+    10: 29   # Position 10 = Slot 29
+    11: 30   # Position 11 = Slot 30
+    12: 31   # Position 12 = Slot 31
 
-# General plugin settings
+# Plugin settings
 settings:
   debug: true
-  cancel-click: true
-  command-delay: 2
-  click-sound:
-    enabled: true
-    sound: "UI_BUTTON_CLICK"
-    volume: 0.5
-    pitch: 1.0
-  click-particles:
-    enabled: true
-    particle: "VILLAGER_HAPPY"
-    count: 5
 
-# Menu detection settings
-menu-detection:
-  # Plugin will only work when:
-  # 1. Menu title contains "chế tạo"
-  # 2. There's an item with custom model data 10004 at slot 34
-  # 3. There's a result item with MMOItems ID at slot 25
-  title-pattern: "chế tạo"
-  recipe-indicator-slot: 34
-  recipe-indicator-model-data: 10004
-  result-item-slot: 25
-
-# Command execution settings
+# Command settings
 commands:
-  max-commands-per-click: 10
-  async-execution: true
   cooldown:
     enabled: true
     duration: 1
-  error-handling:
-    log-errors: true
-    notify-player: false
-    fallback-message: "&cSomething went wrong! Please contact an administrator."
-
-# MMOItems integration settings
-mmoitems:
-  # These are the persistent data container keys used by MMOItems
-  id-key: "mmoitems:mmoitems_item_id"
-  # Convert to uppercase for consistency
-  uppercase-keys: true

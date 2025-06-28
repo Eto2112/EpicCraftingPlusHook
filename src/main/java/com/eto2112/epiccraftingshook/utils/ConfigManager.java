@@ -12,7 +12,6 @@ public class ConfigManager {
     private FileConfiguration config;
     private Map<Integer, Integer> slotMapping;
     private Map<String, Map<Integer, List<String>>> itemCommands;
-    private List<String> titlePatterns;
 
     public ConfigManager(EpicCraftingsHookPlugin plugin) {
         this.plugin = plugin;
@@ -20,22 +19,14 @@ public class ConfigManager {
     }
 
     public void loadConfig() {
-        // Save default config if it doesn't exist
         plugin.saveDefaultConfig();
-
-        // Reload config from file
         plugin.reloadConfig();
         config = plugin.getConfig();
 
-        // Load all configuration sections
         loadSlotMapping();
         loadItemCommands();
-        loadMenuDetection();
 
         plugin.getLogger().info("Configuration loaded successfully!");
-        if (isDebugEnabled()) {
-            plugin.getLogger().info("Debug mode enabled");
-        }
     }
 
     private void loadSlotMapping() {
@@ -49,29 +40,16 @@ public class ConfigManager {
                     int slot = mappingSection.getInt(key);
                     slotMapping.put(position, slot);
                 } catch (NumberFormatException e) {
-                    plugin.getLogger().warning("Invalid slot mapping key: " + key);
+                    plugin.getLogger().warning("Invalid slot mapping: " + key);
                 }
             }
         }
 
         // Default mapping if none configured
         if (slotMapping.isEmpty()) {
-            slotMapping.put(1, 10);
-            slotMapping.put(2, 11);
-            slotMapping.put(3, 12);
-            slotMapping.put(4, 13);
-            slotMapping.put(5, 19);
-            slotMapping.put(6, 20);
-            slotMapping.put(7, 21);
-            slotMapping.put(8, 22);
-            slotMapping.put(9, 28);
-            slotMapping.put(10, 29);
-            slotMapping.put(11, 30);
-            slotMapping.put(12, 31);
-        }
-
-        if (isDebugEnabled()) {
-            plugin.getLogger().info("Loaded slot mapping: " + slotMapping);
+            slotMapping.put(1, 10); slotMapping.put(2, 11); slotMapping.put(3, 12); slotMapping.put(4, 13);
+            slotMapping.put(5, 19); slotMapping.put(6, 20); slotMapping.put(7, 21); slotMapping.put(8, 22);
+            slotMapping.put(9, 28); slotMapping.put(10, 29); slotMapping.put(11, 30); slotMapping.put(12, 31);
         }
     }
 
@@ -81,19 +59,11 @@ public class ConfigManager {
 
         if (commandsSection != null) {
             for (String recipeKey : commandsSection.getKeys(false)) {
-                if (isDebugEnabled()) {
-                    plugin.getLogger().info("Loading commands for recipe: '" + recipeKey + "'");
-                }
-
                 Map<Integer, List<String>> recipeCommands = new HashMap<>();
                 ConfigurationSection recipeSection = commandsSection.getConfigurationSection(recipeKey);
 
                 if (recipeSection != null) {
                     for (String slotKey : recipeSection.getKeys(false)) {
-                        if (isDebugEnabled()) {
-                            plugin.getLogger().info("Processing slot key: '" + slotKey + "' for recipe: '" + recipeKey + "'");
-                        }
-
                         try {
                             int slot = Integer.parseInt(slotKey);
                             Object commandsObj = recipeSection.get(slotKey);
@@ -113,73 +83,39 @@ public class ConfigManager {
 
                             if (!commands.isEmpty()) {
                                 recipeCommands.put(slot, commands);
-                                if (isDebugEnabled()) {
-                                    plugin.getLogger().info("Added " + commands.size() + " commands for slot " + slot + " in " + recipeKey);
-                                }
                             }
                         } catch (NumberFormatException e) {
                             plugin.getLogger().warning("Invalid slot number in " + recipeKey + ": " + slotKey);
                         }
                     }
-                } else {
-                    if (isDebugEnabled()) {
-                        plugin.getLogger().warning("No configuration section found for: " + recipeKey);
-                    }
                 }
 
                 if (!recipeCommands.isEmpty()) {
                     itemCommands.put(recipeKey, recipeCommands);
-                    if (isDebugEnabled()) {
-                        plugin.getLogger().info("Successfully loaded " + recipeCommands.size() + " slot configurations for " + recipeKey);
-                    }
                 }
             }
-        } else {
-            plugin.getLogger().warning("No 'items-command' section found in config.yml");
         }
 
-        plugin.getLogger().info("Loaded item commands for " + itemCommands.size() + " recipes");
-        if (isDebugEnabled()) {
-            plugin.getLogger().info("Loaded recipes: " + itemCommands.keySet());
-        }
+        plugin.getLogger().info("Loaded commands for " + itemCommands.size() + " recipes");
     }
 
-    private void loadMenuDetection() {
-        // Load title patterns - simplified to just look for "chế tạo"
-        titlePatterns = config.getStringList("menu-detection.title-patterns");
-        if (titlePatterns.isEmpty()) {
-            titlePatterns = Arrays.asList("chế tạo");
-        }
-
-        if (isDebugEnabled()) {
-            plugin.getLogger().info("Loaded title patterns: " + titlePatterns);
-        }
-    }
-
-    // Getter methods
-
-    public List<String> getCommandsForItem(String recipeKey, int slotPosition) {
-        Map<Integer, List<String>> recipeCommands = itemCommands.get(recipeKey);
-        if (recipeCommands != null) {
-            return recipeCommands.getOrDefault(slotPosition, new ArrayList<>());
-        }
-        return new ArrayList<>();
-    }
-
+    // Core getter methods
     public List<String> getCommandsForSlot(String recipeKey, int inventorySlot) {
-        // Convert inventory slot to position number
         int position = getPositionFromSlot(inventorySlot);
         if (position > 0) {
-            return getCommandsForItem(recipeKey, position);
+            Map<Integer, List<String>> recipeCommands = itemCommands.get(recipeKey);
+            if (recipeCommands != null) {
+                return recipeCommands.getOrDefault(position, new ArrayList<>());
+            }
         }
         return new ArrayList<>();
     }
 
-    public int getSlotFromPosition(int position) {
-        return slotMapping.getOrDefault(position, -1);
+    public boolean isRequireItemSlot(int slot) {
+        return slotMapping.containsValue(slot);
     }
 
-    public int getPositionFromSlot(int slot) {
+    private int getPositionFromSlot(int slot) {
         for (Map.Entry<Integer, Integer> entry : slotMapping.entrySet()) {
             if (entry.getValue() == slot) {
                 return entry.getKey();
@@ -188,64 +124,9 @@ public class ConfigManager {
         return -1;
     }
 
-    public boolean isRequireItemSlot(int slot) {
-        return slotMapping.containsValue(slot);
-    }
-
-    public List<String> getTitlePatterns() {
-        return new ArrayList<>(titlePatterns);
-    }
-
-    public boolean isStrictMatching() {
-        return config.getBoolean("menu-detection.strict-matching", false);
-    }
-
+    // Configuration getters
     public boolean isDebugEnabled() {
         return config.getBoolean("settings.debug", false);
-    }
-
-    public boolean shouldCancelClick() {
-        return config.getBoolean("settings.cancel-click", true);
-    }
-
-    public int getCommandDelay() {
-        return config.getInt("settings.command-delay", 2);
-    }
-
-    public boolean isSoundEnabled() {
-        return config.getBoolean("settings.click-sound.enabled", true);
-    }
-
-    public String getClickSound() {
-        return config.getString("settings.click-sound.sound", "UI_BUTTON_CLICK");
-    }
-
-    public float getSoundVolume() {
-        return (float) config.getDouble("settings.click-sound.volume", 0.5);
-    }
-
-    public float getSoundPitch() {
-        return (float) config.getDouble("settings.click-sound.pitch", 1.0);
-    }
-
-    public boolean areParticlesEnabled() {
-        return config.getBoolean("settings.click-particles.enabled", true);
-    }
-
-    public String getClickParticle() {
-        return config.getString("settings.click-particles.particle", "VILLAGER_HAPPY");
-    }
-
-    public int getParticleCount() {
-        return config.getInt("settings.click-particles.count", 5);
-    }
-
-    public int getMaxCommandsPerClick() {
-        return config.getInt("commands.max-commands-per-click", 10);
-    }
-
-    public boolean isAsyncExecutionEnabled() {
-        return config.getBoolean("commands.async-execution", true);
     }
 
     public boolean isCooldownEnabled() {
@@ -256,46 +137,25 @@ public class ConfigManager {
         return config.getInt("commands.cooldown.duration", 1);
     }
 
-    public boolean shouldLogErrors() {
-        return config.getBoolean("commands.error-handling.log-errors", true);
-    }
-
-    public boolean shouldNotifyPlayerOnError() {
-        return config.getBoolean("commands.error-handling.notify-player", false);
-    }
-
-    public String getFallbackMessage() {
-        return config.getString("commands.error-handling.fallback-message",
-                "&cSomething went wrong! Please contact an administrator.");
-    }
-
-    // Recipe indicator settings
-    public int getRecipeIndicatorSlot() {
-        return config.getInt("menu-detection.recipe-indicator-slot", 34);
-    }
-
-    public int getRecipeIndicatorModelData() {
-        return config.getInt("menu-detection.recipe-indicator-model-data", 10004);
-    }
-
-    public int getResultItemSlot() {
-        return config.getInt("menu-detection.result-item-slot", 25);
-    }
-
-    // Utility methods
-
+    // Admin command helpers
     public Set<String> getConfiguredRecipes() {
         return new HashSet<>(itemCommands.keySet());
     }
 
+    public List<String> getCommandsForItem(String recipeKey, int position) {
+        Map<Integer, List<String>> recipeCommands = itemCommands.get(recipeKey);
+        if (recipeCommands != null) {
+            return recipeCommands.getOrDefault(position, new ArrayList<>());
+        }
+        return new ArrayList<>();
+    }
+
+    public int getSlotFromPosition(int position) {
+        return slotMapping.getOrDefault(position, -1);
+    }
+
     public void reloadConfiguration() {
         loadConfig();
-
-        // Clear any caches in the listener if it exists
-        if (plugin.getMenuListener() != null) {
-            plugin.getMenuListener().cleanupCooldowns();
-        }
-
         plugin.getLogger().info("Configuration reloaded!");
     }
 
@@ -303,6 +163,7 @@ public class ConfigManager {
         return config.getString("version", "unknown");
     }
 
+    // Additional methods needed by HookCommand
     public void debugInfo() {
         if (!isDebugEnabled()) return;
 
@@ -310,13 +171,9 @@ public class ConfigManager {
         plugin.getLogger().info("Version: " + getConfigVersion());
         plugin.getLogger().info("Configured recipes: " + getConfiguredRecipes());
         plugin.getLogger().info("Slot mapping: " + slotMapping);
-        plugin.getLogger().info("Title patterns: " + titlePatterns);
-        plugin.getLogger().info("Cancel click: " + shouldCancelClick());
-        plugin.getLogger().info("Command delay: " + getCommandDelay());
-        plugin.getLogger().info("Max commands per click: " + getMaxCommandsPerClick());
-        plugin.getLogger().info("Recipe indicator slot: " + getRecipeIndicatorSlot());
-        plugin.getLogger().info("Recipe indicator model data: " + getRecipeIndicatorModelData());
-        plugin.getLogger().info("Result item slot: " + getResultItemSlot());
+        plugin.getLogger().info("Debug enabled: " + isDebugEnabled());
+        plugin.getLogger().info("Cooldown enabled: " + isCooldownEnabled());
+        plugin.getLogger().info("Cooldown duration: " + getCooldownDuration());
 
         // Debug each recipe
         for (Map.Entry<String, Map<Integer, List<String>>> entry : itemCommands.entrySet()) {
@@ -326,4 +183,9 @@ public class ConfigManager {
             }
         }
     }
+
+    // Dummy methods for HookCommand compatibility
+    public boolean isSoundEnabled() { return false; }
+    public boolean areParticlesEnabled() { return false; }
+    public boolean shouldCancelClick() { return true; }
 }
