@@ -11,96 +11,166 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 public class EnhancedCraftingMenuListener implements Listener {
 
     private final EpicCraftingsHookPlugin plugin;
     private final ConfigManager configManager;
 
-    // Simple cooldown tracking
+    // Cache for performance optimization
     private final Map<UUID, Long> cooldowns = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> titleCache = new ConcurrentHashMap<>();
+    private final Map<Integer, Boolean> slotCache = new ConcurrentHashMap<>();
+
+    // Pre-computed constants for better performance
+    private static final String CRAFTING_KEYWORD = "chế tạo";
+    private static final int INDICATOR_SLOT = 34;
+    private static final int RESULT_SLOT = 25;
+    private static final int INDICATOR_MODEL_DATA = 10004;
 
     public EnhancedCraftingMenuListener(EpicCraftingsHookPlugin plugin) {
         this.plugin = plugin;
         this.configManager = plugin.getConfigManager();
+
+        // Pre-populate slot cache for better performance
+        initializeSlotCache();
+    }
+
+    // Pre-compute slot mappings to avoid repeated calculations
+    private void initializeSlotCache() {
+        for (int i = 0; i < 54; i++) { // Standard inventory size
+            slotCache.put(i, configManager.isRequireItemSlot(i));
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onInventoryClick(InventoryClickEvent event) {
-        // Quick checks first
+        // Fastest possible checks first to minimize overhead
         if (!(event.getWhoClicked() instanceof Player)) return;
-        if (!isRequireItemSlot(event.getSlot())) return;
-        if (!isCraftingMenu(event.getView().getTitle())) return;
 
-        Player player = (Player) event.getWhoClicked();
+        final int clickedSlot = event.getSlot();
 
-        // Check cooldown
-        if (isOnCooldown(player)) return;
+        // Use cached slot lookup instead of method call
+        if (!slotCache.getOrDefault(clickedSlot, false)) return;
 
-        // Verify this is a valid EpicCraftingsPlus menu
-        if (!hasValidIndicator(event.getView())) {
-            if (configManager.isDebugEnabled()) {
-                plugin.getLogger().info("Player " + player.getName() + " clicked fake crafting menu - ignoring");
-            }
-            return;
-        }
+        final String title = event.getView().getTitle();
+        if (!isCraftingMenuCached(title)) return;
 
-        // Get recipe from result item
-        String recipeId = getRecipeId(event.getView());
-        if (recipeId == null) {
-            recipeId = "default_crafting";
-        }
+        final Player player = (Player) event.getWhoClicked();
 
-        // Get commands for this slot
-        List<String> commands = configManager.getCommandsForSlot(recipeId, event.getSlot());
-        if (commands.isEmpty()) return;
+        // Quick cooldown check before expensive operations
+        if (isOnCooldownFast(player)) return;
 
-        // Cancel click and execute commands
+        // Cancel click immediately for better UX
         event.setCancelled(true);
-        setCooldown(player);
-        executeCommands(player, commands);
 
-        if (configManager.isDebugEnabled()) {
-            plugin.getLogger().info("Player " + player.getName() + " clicked slot " + event.getSlot() +
-                    " in recipe " + recipeId + " - executing " + commands.size() + " commands");
+        // Process the click asynchronously to avoid blocking the main thread
+        CompletableFuture.runAsync(() -> {
+            processClickAsync(player, clickedSlot, event.getView());
+        }).exceptionally(throwable -> {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().warning("Async click processing failed: " + throwable.getMessage());
+            }
+            return null;
+        });
+    }
+
+    // Cached title checking for better performance
+    private boolean isCraftingMenuCached(String title) {
+        if (title == null) return false;
+
+        // Check cache first
+        Boolean cached = titleCache.get(title);
+        if (cached != null) return cached;
+
+        // Compute and cache result
+        String cleanTitle = ChatColor.stripColor(title).toLowerCase();
+        boolean result = cleanTitle.contains(CRAFTING_KEYWORD);
+
+        // Only cache positive results to avoid memory bloat
+        if (result) {
+            titleCache.put(title, true);
+        }
+
+        return result;
+    }
+
+    // Optimized cooldown check without synchronization overhead
+    private boolean isOnCooldownFast(Player player) {
+        if (!configManager.isCooldownEnabled()) return false;
+
+        Long cooldownEnd = cooldowns.get(player.getUniqueId());
+        if (cooldownEnd == null) return false;
+
+        long currentTime = System.currentTimeMillis();
+        if (currentTime >= cooldownEnd) {
+            cooldowns.remove(player.getUniqueId());
+            return false;
+        }
+        return true;
+    }
+
+    // Process click operations asynchronously
+    private void processClickAsync(Player player, int clickedSlot, org.bukkit.inventory.InventoryView view) {
+        try {
+            // Validate menu structure asynchronously
+            if (!hasValidIndicatorAsync(view)) {
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().info("Player " + player.getName() + " clicked invalid crafting menu - ignoring");
+                }
+                return;
+            }
+
+            // Get recipe ID asynchronously
+            String recipeId = getRecipeIdAsync(view);
+            if (recipeId == null) {
+                recipeId = "default_crafting";
+            }
+
+            // Get commands (this is already cached in ConfigManager)
+            List<String> commands = configManager.getCommandsForSlot(recipeId, clickedSlot);
+            if (commands.isEmpty()) return;
+
+            // Set cooldown
+            setCooldownFast(player);
+
+            // Execute commands on main thread (required for Bukkit API)
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    executeCommandsSync(player, commands);
+                }
+            }.runTask(plugin);
+
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().info("Player " + player.getName() + " clicked slot " + clickedSlot +
+                        " in recipe " + recipeId + " - executing " + commands.size() + " commands");
+            }
+
+        } catch (Exception e) {
+            if (configManager.isDebugEnabled()) {
+                plugin.getLogger().warning("Error in async click processing: " + e.getMessage());
+            }
         }
     }
 
-    // Quick check if this is a crafting menu
-    private boolean isCraftingMenu(String title) {
-        return title != null && ChatColor.stripColor(title).toLowerCase().contains("chế tạo");
-    }
-
-    // Quick check if this is a require item slot
-    private boolean isRequireItemSlot(int slot) {
-        return configManager.isRequireItemSlot(slot);
-    }
-
-    // Check if menu has valid indicator at slot 34
-    private boolean hasValidIndicator(org.bukkit.inventory.InventoryView view) {
+    // Async version of indicator validation
+    private boolean hasValidIndicatorAsync(org.bukkit.inventory.InventoryView view) {
         try {
-            ItemStack item = view.getTopInventory().getItem(34);
+            ItemStack item = view.getTopInventory().getItem(INDICATOR_SLOT);
             if (item == null) return false;
 
-            // Safe ItemMeta access
-            ItemMeta meta;
-            try {
-                if (!item.hasItemMeta()) return false;
-                meta = item.getItemMeta();
-                if (meta == null) return false;
-            } catch (Exception e) {
-                if (configManager.isDebugEnabled()) {
-                    plugin.getLogger().warning("Error accessing ItemMeta for indicator: " + e.getMessage());
-                }
-                return false;
-            }
+            ItemMeta meta = item.getItemMeta();
+            if (meta == null) return false;
 
-            return meta.hasCustomModelData() && meta.getCustomModelData() == 10004;
+            return meta.hasCustomModelData() && meta.getCustomModelData() == INDICATOR_MODEL_DATA;
         } catch (Exception e) {
             if (configManager.isDebugEnabled()) {
                 plugin.getLogger().warning("Error checking recipe indicator: " + e.getMessage());
@@ -109,42 +179,21 @@ public class EnhancedCraftingMenuListener implements Listener {
         }
     }
 
-    // Get recipe ID from result item at slot 25
-    private String getRecipeId(org.bukkit.inventory.InventoryView view) {
+    // Async version of recipe ID extraction
+    private String getRecipeIdAsync(org.bukkit.inventory.InventoryView view) {
         try {
-            ItemStack resultItem = view.getTopInventory().getItem(25);
+            ItemStack resultItem = view.getTopInventory().getItem(RESULT_SLOT);
             if (resultItem == null) return null;
 
-            // Safe NBT access with multiple try-catch blocks
-            try {
-                NBTItem nbtItem = NBTItem.get(resultItem);
-                if (nbtItem != null && nbtItem.hasType()) {
-                    String itemId = nbtItem.getString("MMOITEMS_ITEM_ID");
-                    return itemId != null && !itemId.trim().isEmpty() ? itemId.trim().toUpperCase() : null;
-                }
-            } catch (Exception nbtError) {
-                if (configManager.isDebugEnabled()) {
-                    plugin.getLogger().warning("NBT access failed for result item: " + nbtError.getMessage());
-                }
-
-                // Fallback: Try basic ItemMeta check to see if this looks like an MMOItems item
-                try {
-                    if (resultItem.hasItemMeta()) {
-                        ItemMeta meta = resultItem.getItemMeta();
-                        if (meta != null && meta.hasDisplayName()) {
-                            String displayName = meta.getDisplayName();
-                            // If it has a colored name, it's likely an MMOItems item but we can't read the ID
-                            if (displayName.contains("§") && configManager.isDebugEnabled()) {
-                                plugin.getLogger().info("Item appears to be MMOItems but NBT is corrupted");
-                            }
-                        }
-                    }
-                } catch (Exception metaError) {
-                    if (configManager.isDebugEnabled()) {
-                        plugin.getLogger().warning("ItemMeta access also failed: " + metaError.getMessage());
-                    }
+            // Use NBT reading with better error handling
+            NBTItem nbtItem = NBTItem.get(resultItem);
+            if (nbtItem != null && nbtItem.hasType()) {
+                String itemId = nbtItem.getString("MMOITEMS_ITEM_ID");
+                if (itemId != null && !itemId.trim().isEmpty()) {
+                    return itemId.trim().toUpperCase();
                 }
             }
+
         } catch (Exception e) {
             if (configManager.isDebugEnabled()) {
                 plugin.getLogger().warning("Error getting recipe ID: " + e.getMessage());
@@ -153,38 +202,60 @@ public class EnhancedCraftingMenuListener implements Listener {
         return null;
     }
 
-    // Simple cooldown check
-    private boolean isOnCooldown(Player player) {
-        if (!configManager.isCooldownEnabled()) return false;
-
-        Long cooldownEnd = cooldowns.get(player.getUniqueId());
-        if (cooldownEnd == null) return false;
-
-        if (System.currentTimeMillis() >= cooldownEnd) {
-            cooldowns.remove(player.getUniqueId());
-            return false;
-        }
-        return true;
-    }
-
-    // Set cooldown for player
-    private void setCooldown(Player player) {
+    // Fast cooldown setting without synchronization overhead
+    private void setCooldownFast(Player player) {
         if (configManager.isCooldownEnabled()) {
             cooldowns.put(player.getUniqueId(),
                     System.currentTimeMillis() + (configManager.getCooldownDuration() * 1000L));
         }
     }
 
-    // Execute commands for player
-    private void executeCommands(Player player, List<String> commands) {
+    // Optimized command execution
+    private void executeCommandsSync(Player player, List<String> commands) {
+        // Execute all commands without delay for better performance
+        // The original delay was causing unnecessary complexity
         for (String command : commands) {
-            plugin.getCommandExecutor().executeCommand(player, command);
+            try {
+                plugin.getCommandExecutor().executeCommand(player, command);
+            } catch (Exception e) {
+                if (configManager.isDebugEnabled()) {
+                    plugin.getLogger().warning("Error executing command: " + command + " - " + e.getMessage());
+                }
+            }
         }
     }
 
-    // Cleanup expired cooldowns
+    // Cleanup method with batch processing for better performance
     public void cleanupCooldowns() {
+        if (cooldowns.isEmpty()) return;
+
         long currentTime = System.currentTimeMillis();
-        cooldowns.entrySet().removeIf(entry -> entry.getValue() < currentTime);
+
+        // Use parallel processing for large cooldown maps
+        if (cooldowns.size() > 100) {
+            CompletableFuture.runAsync(() -> {
+                cooldowns.entrySet().removeIf(entry -> entry.getValue() < currentTime);
+            });
+        } else {
+            cooldowns.entrySet().removeIf(entry -> entry.getValue() < currentTime);
+        }
+    }
+
+    // Clear caches when needed (called by ConfigManager on reload)
+    public void clearCaches() {
+        titleCache.clear();
+        initializeSlotCache(); // Rebuild slot cache with new config
+
+        if (configManager.isDebugEnabled()) {
+            plugin.getLogger().info("Listener caches cleared and rebuilt");
+        }
+    }
+
+    // Method to get current cache sizes for debugging
+    public void logCacheStats() {
+        if (configManager.isDebugEnabled()) {
+            plugin.getLogger().info("Cache stats - Titles: " + titleCache.size() +
+                    ", Cooldowns: " + cooldowns.size());
+        }
     }
 }
